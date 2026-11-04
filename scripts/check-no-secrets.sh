@@ -44,7 +44,9 @@ done < <( { git ls-files; git diff --cached --name-only; } | sort -u)
 for entry in "${PATTERNS[@]}"; do
   label="${entry%%|*}"
   regex="${entry#*|}"
-  if hits="$(grep -nEI -- "$regex" "${FILES[@]}" 2>/dev/null)"; then
+  # 100.100.100.100 is Tailscale's fixed MagicDNS resolver, not a device IP.
+  if hits="$(grep -nEI -- "$regex" "${FILES[@]}" 2>/dev/null \
+             | sed 's/100\.100\.100\.100/<magicdns>/g' | grep -E -- "$regex")"; then
     echo "FAIL possible $label:"
     printf '%s\n' "$hits" | sed 's/^/  /'
     failed=1
