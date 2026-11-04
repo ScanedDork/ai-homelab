@@ -12,21 +12,25 @@ name: homelab-pi
 
 # --- Optional: multiple Hermes Agent containers ---------------------------
 # Uncomment this anchor AND the hermes-* services below. Each instance gets its
-# own config file and state volume; add an instance by copying a 4-line block
-# and bumping the number. TODOs: confirm image, container config path and
-# command for your Hermes Agent version before enabling.
+# own HERMES_HOME (/opt/data in the image): HERMES_DATA_ROOT/hermes-N on the
+# host, holding that instance's config.yaml, .env and state. Never share one
+# directory between instances (upstream: they would contend for one lock).
+# Add an instance by copying a 5-line block and bumping the number.
+# Image facts (nousresearch/hermes-agent): multi-arch, entrypoint dispatches
+# `hermes <args>`, starts as root and drops to a hermes user remapped to
+# HERMES_UID/HERMES_GID, keeps everything under /opt/data.
 #
 # x-hermes: &hermes
-#   image: ${HERMES_IMAGE:?set HERMES_IMAGE in .env}
+#   image: ${HERMES_IMAGE:-docker.io/nousresearch/hermes-agent:latest}
 #   platform: linux/arm64
 #   restart: unless-stopped
-#   init: true
-#   security_opt:
-#     - no-new-privileges:true
+#   command: ["gateway", "run"]
 #   environment:
 #     TZ: ${TZ:-Europe/Prague}
-#   # No ports: Hermes talks outbound (LiteLLM / Ollama / chat platforms).
-#   mem_limit: 512m
+#     HERMES_UID: ${HERMES_UID:-1000}
+#     HERMES_GID: ${HERMES_GID:-1000}
+#   # No ports: the gateway only talks outbound (LiteLLM, Ollama, chat platforms).
+#   mem_limit: 768m
 #   logging:
 #     driver: json-file
 #     options:
@@ -94,18 +98,14 @@ services:
   #   <<: *hermes
   #   container_name: hermes-1
   #   volumes:
-  #     - ../hermes/instances/hermes-1/config.yaml:/TODO-hermes-home/config.yaml:ro
-  #     - hermes_1_state:/TODO-hermes-home/state
+  #     - ${HERMES_DATA_ROOT:-/srv/hermes}/hermes-1:/opt/data
   #
   # hermes-2:
   #   <<: *hermes
   #   container_name: hermes-2
   #   volumes:
-  #     - ../hermes/instances/hermes-2/config.yaml:/TODO-hermes-home/config.yaml:ro
-  #     - hermes_2_state:/TODO-hermes-home/state
+  #     - ${HERMES_DATA_ROOT:-/srv/hermes}/hermes-2:/opt/data
 
 volumes:
   n8n_data:
     name: ${N8N_VOLUME_NAME:-n8n_data}
-  # hermes_1_state: {}
-  # hermes_2_state: {}

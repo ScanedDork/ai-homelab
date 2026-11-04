@@ -1,20 +1,23 @@
-# Hermes Agent config template -> copy to ~/.hermes/config.yaml
+# Hermes Agent config template -> ~/.hermes/config.yaml (host install), or
+# HERMES_DATA_ROOT/hermes-N/config.yaml for a Pi container instance.
 #   cp hermes/config.yaml.template ~/.hermes/config.yaml
-# Merge into your existing file rather than overwriting it if you have other
-# settings. Key names follow Hermes Agent's `model:` section; verify against
-# `hermes config` output for your installed version.
+# Merge into your existing file rather than overwriting other settings.
+# Key names match upstream cli-config.yaml.example (model.default /
+# model.provider / model.base_url / model.api_key).
 
 model:
   # Default model served by Ollama on dorkmini.
   default: "qwen3.5:4b"
-  # OpenAI-compatible custom endpoint (Ollama's /v1 API).
+  # "custom" = any OpenAI-compatible endpoint ("ollama" is an alias of it).
   provider: "custom"
   base_url: "http://dorkmini:11434/v1"
+  # Ollama needs no key.
 
 # Alternative: route through LiteLLM on the Pi for automatic cloud fallback.
 # model:
 #   default: "local-chat"
 #   provider: "custom"
 #   base_url: "http://n8npi:4000/v1"
-#   # API key: put LITELLM_MASTER_KEY where your Hermes version reads custom
-#   # endpoint keys (TODO: confirm, typically ~/.hermes/.env), never in this file.
+#   # LITELLM_MASTER_KEY or a LiteLLM virtual key. This file then holds a
+#   # secret: keep it chmod 600 and outside any git repo.
+#   api_key: "REPLACE_WITH_LITELLM_KEY"

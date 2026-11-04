@@ -77,6 +77,28 @@ your tier allows. Check model IDs still exist (free catalogues change).
 
 **401 from LiteLLM.** The client is not sending `Authorization: Bearer $LITELLM_MASTER_KEY`.
 
+## OpenClaw
+
+**Container unhealthy right after first start.** Onboarding has not run; follow
+`openclaw/README.md` "First run". `docker logs openclaw-gateway` shows the reason.
+
+**`EACCES` on `/home/node/.openclaw`.** The host directories are not owned by uid 1000:
+`sudo chown -R 1000:1000 /srv/openclaw`.
+
+**Control UI rejects the origin.** Add the URL you browse from (e.g. `http://n8npi:18789`)
+to `gateway.controlUi.allowedOrigins` (see the README's `config set` command).
+
+**Model answers contain raw tool-call JSON.** The provider points at `.../v1`; change it
+to the native `http://dorkmini:11434`.
+
+## Hermes containers
+
+**`hermes-N` restarts in a loop.** `docker logs hermes-N`; usually a missing or invalid
+`/srv/hermes/hermes-N/config.yaml`. Check with `docker exec hermes-N hermes doctor`.
+
+**Permission denied under `/opt/data`.** The instance dir owner must match
+`HERMES_UID`/`HERMES_GID` in `.env`.
+
 ## Tailscale
 
 **`tailscale FAIL BackendState=NeedsLogin`.** Key expired or logged out:

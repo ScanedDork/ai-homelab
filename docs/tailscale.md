@@ -18,7 +18,7 @@
 | n8n UI + webhooks | 5678 on n8npi | your admin devices | LAN, Funnel, public DNS |
 | LiteLLM | 4000 on n8npi | n8npi itself, admin devices, Hermes hosts | LAN, Funnel |
 | Ollama | 11434 on dorkmini | n8npi, Hermes hosts, admin devices | LAN, Funnel, `0.0.0.0` bind |
-| OpenClaw | 18789 (host TBD) | admin devices | Funnel until auth is confirmed |
+| OpenClaw | 18789 on n8npi (recommended host) | admin devices | Funnel (OpenClaw's own `tailscale.mode: funnel` included), LAN |
 | SSH | 22 | admin devices (prefer Tailscale SSH) | password auth |
 
 - **No Tailscale Funnel** for any of these. If a webhook must be reachable from the
@@ -43,12 +43,12 @@ disables its key expiry and detaches it from your user; re-authenticate with
   "acls": [
     // You (admins) can reach the service ports and SSH.
     { "action": "accept", "src": ["autogroup:admin"],
-      "dst": ["tag:homelab-pi:22,5678,4000", "tag:homelab-mac:22,11434"] },
+      "dst": ["tag:homelab-pi:22,5678,4000,18789", "tag:homelab-mac:22,11434"] },
     // The Pi (n8n, LiteLLM, Hermes containers) may call Ollama, nothing else.
     { "action": "accept", "src": ["tag:homelab-pi"], "dst": ["tag:homelab-mac:11434"] }
-    // TODO: add OpenClaw's port 18789 on whichever tag hosts it.
-    // TODO: if Hermes runs on dorkmini and uses LiteLLM, allow
-    //       tag:homelab-mac -> tag:homelab-pi:4000.
+    // If OpenClaw runs on dorkmini instead, move 18789 to the tag:homelab-mac entry.
+    // If Hermes on dorkmini should use LiteLLM, also allow
+    //   { "action": "accept", "src": ["tag:homelab-mac"], "dst": ["tag:homelab-pi:4000"] }
   ],
   "ssh": [
     { "action": "check", "src": ["autogroup:admin"],

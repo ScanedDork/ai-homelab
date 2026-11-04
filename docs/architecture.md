@@ -8,20 +8,22 @@ replaced by Tailscale on purpose; do not reintroduce it.
 |---|---|---|---|
 | `n8npi`, Raspberry Pi 4B, arm64, always on | Automation + routing, isolated from the Mac | n8n (Docker), LiteLLM (Docker, manual), optional Hermes containers | 5678 n8n, 4000 LiteLLM |
 | `dorkmini`, Mac Mini | Inference | Ollama (launchd, native for Metal GPU), larger models | 11434 Ollama |
-| Host TBD | AI gateway | OpenClaw (placeholder) | 18789 |
+| `n8npi` (recommended) | AI gateway | OpenClaw (Docker, optional) | 18789 |
 
 ## Request flows
 
 1. **Workflow → LLM**: n8n → LiteLLM `n8npi:4000` → Ollama `dorkmini:11434`.
    If Ollama errors, times out or is cooling down, LiteLLM falls back to Gemini →
    Groq → Cerebras → OpenRouter free tiers over the internet.
-2. **Hermes → LLM**: Hermes → `http://dorkmini:11434/v1` directly (current config),
+2. **OpenClaw → LLM**: gateway → Ollama native API `http://dorkmini:11434` (no `/v1`;
+   OpenClaw's docs say the OpenAI-compatible path breaks tool calling).
+3. **Hermes → LLM**: Hermes → `http://dorkmini:11434/v1` directly (current config),
    or via LiteLLM to get cloud fallback.
-3. **Webhook API**: a tailnet client → `POST n8npi:5678/webhook/llm-prompt` → flow 1 →
+4. **Webhook API**: a tailnet client → `POST n8npi:5678/webhook/llm-prompt` → flow 1 →
    JSON response.
-4. **Monitoring**: n8n schedules → HTTP checks → Telegram Bot API (outbound only).
+5. **Monitoring**: n8n schedules → HTTP checks → Telegram Bot API (outbound only).
    `scripts/healthcheck.sh` gives the same view from a shell.
-5. **Backups**: systemd timer on the Pi → `backup-n8n.sh` → `/srv/n8n-backups`
+6. **Backups**: systemd timer on the Pi → `backup-n8n.sh` → `/srv/n8n-backups`
    (+ `status/status.json`, mounted read-only into n8n for the weekly report).
 
 ## Why this split

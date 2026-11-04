@@ -23,6 +23,10 @@ Tick these off on each device. Items marked (repo) are already done by files her
 - [ ] n8n hardening env (repo): Execute Command node excluded, env access blocked in
       expressions, file nodes restricted to the backup-status dir, telemetry off.
 - [ ] Webhooks use header auth (repo: workflow 2) and are tailnet-only.
+- [ ] OpenClaw (if deployed): token auth with a random `OPENCLAW_GATEWAY_TOKEN`, Tailscale-IP
+      bind (repo: compose), OpenClaw's Funnel mode never enabled, channel tokens only in `.env`.
+- [ ] Hermes containers (if enabled): one directory per instance, `chmod 700`, and
+      no dashboard or host networking (repo: compose).
 - [ ] Backups: timer enabled; copy `/srv/n8n-backups` off the Pi weekly (encrypted,
       e.g. `restic`/`age`), since SD cards fail. Test a restore quarterly.
 - [ ] Boot from SSD/USB rather than SD if possible; enable the hardware watchdog.

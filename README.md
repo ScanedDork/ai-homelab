@@ -14,12 +14,12 @@ flowchart LR
       litellm["LiteLLM proxy :4000<br/>Docker, started manually"]
       hpi["Hermes containers<br/>optional, commented out"]
       bk[("/srv/n8n-backups<br/>systemd timer")]
+      oc["OpenClaw gateway :18789<br/>Docker, optional"]
     end
     subgraph mac["dorkmini: Mac Mini"]
       ollama["Ollama :11434<br/>launchd, TS IP only"]
     end
     hermes["Hermes Agent<br/>~/.hermes/config.yaml"]
-    oc["OpenClaw :18789<br/>host TBD, placeholder"]
   end
   cloud["Free tiers: Gemini, Groq,<br/>Cerebras, OpenRouter"]
   tg["Telegram Bot API"]
@@ -30,6 +30,7 @@ flowchart LR
   litellm -->|primary| ollama
   litellm -.->|fallback| cloud
   hermes -->|/v1| ollama
+  oc -->|native API| ollama
   hpi -.-> litellm
   n8n -->|alerts, reports| tg
   n8n --- bk
@@ -48,7 +49,7 @@ fallbacks, Telegram, and image pulls. Details: [docs/architecture.md](docs/archi
 | `mac/` | Ollama LaunchAgent template, installer that binds `OLLAMA_HOST` to the Tailscale IP, model pull script, notes |
 | `litellm/` | Proxy config (local first, free-tier fallbacks, rate-limit settings) + run/usage notes |
 | `hermes/` | `config.yaml.template` (dorkmini base URL, `qwen3.5:4b`) + model-switching notes |
-| `openclaw/` | Placeholder compose behind a profile + the TODO parameter list |
+| `openclaw/` | Gateway compose (official multi-arch image, Tailscale-IP bind, token auth) + headless onboarding |
 | `scripts/` | `healthcheck.sh`, `backup-n8n.sh`, `restore-n8n.sh`, `update.sh`, validators, `systemd/` timer + Docker drop-in, `cron/` sample |
 | `n8n-workflows/` | Importable: daily healthcheck → Telegram, prompt webhook → LiteLLM, weekly backup report |
 | `docs/` | architecture, tailscale (ACLs), security checklist, runbook, models, storage migration plan |
@@ -94,8 +95,10 @@ Then follow the first-deployment checklist below.
    workflows, edit each **Config** node (Telegram chat ID), then activate (publish) them.
 7. Enable the backup timer (`scripts/systemd/n8n-backup@.service` header), run
    `make backup` once, and test `./scripts/restore-n8n.sh --latest`.
-8. Apply the Tailscale ACL from `docs/tailscale.md`; work through `docs/security.md`.
-9. Save `.env` to your password manager.
+8. Optional: OpenClaw (`openclaw/README.md` "First run"), then set `OPENCLAW_URL`
+   so `make health` checks it. Optional: Hermes containers (`hermes/README.md`).
+9. Apply the Tailscale ACL from `docs/tailscale.md`; work through `docs/security.md`.
+10. Save `.env` to your password manager.
 
 ## What is not automated
 
@@ -104,7 +107,7 @@ Then follow the first-deployment checklist below.
 - Installing the systemd timer/drop-in or crontab on the Pi.
 - Creating n8n credentials (Telegram, header auth) and editing workflow Config nodes.
 - Copying backups off the Pi, and backing up `.env` (holds the encryption key).
-- OpenClaw and multi-Hermes deployment (TODO placeholders only).
+- Running OpenClaw onboarding and enabling the commented Hermes containers (both documented).
 - Mac power settings, FileVault/auto-login choice, Ollama.app login item.
 - The website migration in `docs/storage-migration.md` (plan only).
 - Nothing here has been run against the real devices; CI validates statically.
