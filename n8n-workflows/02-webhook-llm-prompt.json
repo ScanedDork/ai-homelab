@@ -1,0 +1,254 @@
+{
+  "name": "Homelab: prompt webhook -> LiteLLM",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Prompt webhook -> LiteLLM\n`POST /webhook/llm-prompt` with header auth and JSON `{\"prompt\": \"...\", \"model\": \"local-chat\", \"system\": \"optional\"}`.\nReturns `{\"response\", \"model\"}`.\n\nCredentials to select after import:\n- **Webhook**: Header Auth (e.g. `X-Webhook-Token`)\n- **Call LiteLLM**: Header Auth `Authorization: Bearer <LITELLM_MASTER_KEY>`",
+        "height": 280,
+        "width": 460
+      },
+      "id": "ebf7666a-412d-5b28-8cd9-1c53f46770e3",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "llm-prompt",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "382d9791-615a-5f88-b5cd-ba2a61f34fdb",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "358f65d2-497c-5317-af48-2361385a950e",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "n8n webhook token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "61bcf99e-05db-5828-bb90-4903fff3fe9d",
+              "name": "litellm_url",
+              "value": "http://n8npi:4000",
+              "type": "string"
+            },
+            {
+              "id": "39e55490-deec-5713-b5e3-c81d6ebbbe53",
+              "name": "default_model",
+              "value": "local-chat",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "755e8346-5cd3-5337-8238-ad085065eb1c",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2fbd4807-fd65-5bc7-bf0d-1200f9c4b69b",
+              "leftValue": "={{ typeof $('Webhook').first().json.body.prompt === 'string' && $('Webhook').first().json.body.prompt.trim().length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d47e44b2-c53d-5f8a-ae5c-881618675390",
+      "name": "Has prompt?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.litellm_url }}/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Webhook').first().json.body.model || $('Config').first().json.default_model, messages: [ ...($('Webhook').first().json.body.system ? [{ role: 'system', content: String($('Webhook').first().json.body.system) }] : []), { role: 'user', content: String($('Webhook').first().json.body.prompt) } ] }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "d6b33b6d-66b0-5b70-b373-594902fc551b",
+      "name": "Call LiteLLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "LiteLLM master key"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ response: $json.choices[0].message.content, model: $json.model }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "be828a20-b2d3-5b63-aaba-8a56981c9366",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'LiteLLM request failed', detail: $json.error ? ($json.error.message || $json.error) : 'unknown' }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "4e366661-c1c2-548a-9af0-aacd6f74745e",
+      "name": "Respond 502",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'JSON body must include a non-empty \"prompt\" string' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "1ec96034-92d6-50ef-9a70-56f0625309f5",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Has prompt?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has prompt?": {
+      "main": [
+        [
+          {
+            "node": "Call LiteLLM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LiteLLM": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 502",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "pinData": {},
+  "tags": []
+}

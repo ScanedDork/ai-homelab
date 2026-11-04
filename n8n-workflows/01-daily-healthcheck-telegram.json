@@ -1,0 +1,281 @@
+{
+  "name": "Homelab: daily healthcheck -> Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Daily homelab healthcheck\nRuns 08:00 Europe/Prague. Checks Ollama on dorkmini (and required models) and LiteLLM on n8npi, then sends a Telegram message.\n\nEdit **Config** after import: `telegram_chat_id`, URLs, `notify_on_success`.\nSelect your Telegram credential on **Send Telegram**.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "07eb0a54-2a9e-577b-bc78-68246e4003eb",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "8c921562-0a75-553b-997d-8e179f6fbe41",
+      "name": "Daily 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "14efd21d-5bd5-518b-9943-320c5c441ece",
+              "name": "telegram_chat_id",
+              "value": "REPLACE_WITH_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "9557ccf6-2944-527f-82fc-53b04912d4f2",
+              "name": "ollama_url",
+              "value": "http://dorkmini:11434",
+              "type": "string"
+            },
+            {
+              "id": "851100ee-5e54-5fd8-b0e6-b6ecdd45ced5",
+              "name": "litellm_url",
+              "value": "http://n8npi:4000",
+              "type": "string"
+            },
+            {
+              "id": "c40aca5b-2ac4-50dc-b0d5-7ac9a4db627d",
+              "name": "required_models",
+              "value": "qwen3.5:4b",
+              "type": "string"
+            },
+            {
+              "id": "a7c86cd7-d199-57df-aacb-b34bad71d468",
+              "name": "notify_on_success",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "36b81150-6f1d-5338-81e4-babfab88038b",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.ollama_url }}/api/tags",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "3e9f52f4-6239-5b04-92ba-c16c9707579e",
+      "name": "Check Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').first().json.litellm_url }}/health/liveliness",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "82c7a0f3-8274-5ee8-b60e-13960157cdc3",
+      "name": "Check LiteLLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the HTTP check results into one Telegram message.\nconst cfg = $('Config').first().json;\nconst checks = [\n  ['Ollama (dorkmini)', 'Check Ollama', (r) => {\n    const names = ((r.body && r.body.models) || []).map((m) => m.name);\n    const want = String(cfg.required_models).split(/\\s+/).filter(Boolean)\n      .map((m) => (m.includes(':') ? m : `${m}:latest`));\n    const missing = want.filter((m) => !names.includes(m));\n    return missing.length ? `missing models: ${missing.join(', ')}` : `${names.length} models`;\n  }],\n  ['LiteLLM (n8npi)', 'Check LiteLLM', () => 'alive'],\n];\nconst lines = [];\nlet failed = 0;\nfor (const [label, nodeName, describe] of checks) {\n  const r = $(nodeName).first().json;\n  let ok = !r.error && r.statusCode >= 200 && r.statusCode < 300;\n  let detail = r.error ? (r.error.message || String(r.error)) : `HTTP ${r.statusCode}`;\n  if (ok) {\n    detail = describe(r);\n    if (detail.startsWith('missing')) ok = false;\n  }\n  if (!ok) failed += 1;\n  lines.push(`${ok ? 'OK  ' : 'FAIL'} ${label}: ${detail}`);\n}\nconst header = failed\n  ? `Homelab healthcheck: ${failed} FAIL`\n  : 'Homelab healthcheck: all OK';\nreturn [{ json: {\n  failed,\n  send: failed > 0 || cfg.notify_on_success === true,\n  message: [header, ...lines].join('\\n'),\n} }];"
+      },
+      "id": "050c6e94-393a-56f6-a962-a36e3de16dbe",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "556abf79-288b-5f7c-a5d2-9a19252de60d",
+              "leftValue": "={{ $json.send }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f34b0e85-6665-55bb-93cb-ee2c9f1f0f8e",
+      "name": "Should notify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config').first().json.telegram_chat_id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "9c93ac44-af81-54da-bd8c-92be8ad5d0fe",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        80
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Telegram bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 08:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Check Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Ollama": {
+      "main": [
+        [
+          {
+            "node": "Check LiteLLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check LiteLLM": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Should notify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should notify?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "pinData": {},
+  "tags": []
+}

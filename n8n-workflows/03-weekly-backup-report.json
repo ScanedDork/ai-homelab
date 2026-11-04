@@ -1,0 +1,204 @@
+{
+  "name": "Homelab: weekly backup status report",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Weekly backup status report\nSundays 09:00. Reads `status.json` written by `scripts/backup-n8n.sh` (mounted read-only at `/home/node/backup-status`) and sends a Telegram summary. Flags failures and backups older than `max_age_hours`.\n\nEdit **Config** after import and select your Telegram credential.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "df07e18e-6c06-522d-9919-26ec710b9452",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                0
+              ],
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "16e73522-43e1-5f7a-88b1-8ca2cc67bc33",
+      "name": "Weekly Sun 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "99b11e83-d949-586c-9f4a-42bb18606c97",
+              "name": "telegram_chat_id",
+              "value": "REPLACE_WITH_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "a300465e-ee05-542d-92ca-f96e9e130988",
+              "name": "max_age_hours",
+              "value": 36,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a3f51d62-e48a-5fbe-8111-6b5d5d3612a8",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/backup-status/status.json",
+        "options": {}
+      },
+      "id": "b340c92c-e843-56a4-a3bf-428929a85c87",
+      "name": "Read status file",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        440,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "options": {}
+      },
+      "id": "84c8aba4-044d-5791-81ad-91894de6a0c6",
+      "name": "Parse JSON",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        660,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the weekly backup report from BACKUP_DIR/status/status.json.\nconst cfg = $('Config').first().json;\nconst item = $input.first().json;\nconst s = item.data;\nif (item.error || !s || typeof s !== 'object') {\n  const why = item.error ? (item.error.message || String(item.error)) : 'empty or unreadable';\n  return [{ json: { message: `Weekly n8n backup report: FAIL\\nCannot read status file (${why}).\\n`\n    + 'Is the backup timer running on n8npi? (systemctl list-timers n8n-backup*)' } }];\n}\nconst ageHours = (Date.now() - new Date(s.last_run).getTime()) / 36e5;\nconst stale = !(ageHours <= Number(cfg.max_age_hours));\nconst ok = s.result === 'ok' && !stale;\nconst mb = (Number(s.size_bytes || 0) / 1048576).toFixed(1);\nconst lines = [\n  `Weekly n8n backup report: ${ok ? 'OK' : 'FAIL'}`,\n  `Last run: ${s.last_run} (${Math.round(ageHours)} h ago)${stale ? ' - STALE' : ''}`,\n  `Result: ${s.result} - ${s.message}`,\n  `Latest archive: ${s.archive || 'n/a'} (${mb} MB)`,\n  `Archives kept: ${s.archive_count} of ${s.retention}`,\n];\nreturn [{ json: { ok, message: lines.join('\\n') } }];"
+      },
+      "id": "59a1b139-a850-5c0c-a1c2-0db247d0b272",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config').first().json.telegram_chat_id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "4a5d99db-3cf5-5b9c-a368-77976a474c88",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Telegram bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Sun 09:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Read status file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read status file": {
+      "main": [
+        [
+          {
+            "node": "Parse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse JSON": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Prague"
+  },
+  "pinData": {},
+  "tags": []
+}
