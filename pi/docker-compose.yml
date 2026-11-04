@@ -46,6 +46,9 @@ services:
       GENERIC_TIMEZONE: ${TZ:-Europe/Prague}
       N8N_HOST: ${N8N_HOST:-n8npi}
       N8N_PORT: "5678"
+      # Inside the container only; host exposure is limited by `ports:` above.
+      # n8n defaults to '::', which crash-loops on hosts with IPv6 disabled.
+      N8N_LISTEN_ADDRESS: 0.0.0.0
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
       WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8npi:5678/}
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}

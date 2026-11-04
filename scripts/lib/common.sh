@@ -18,13 +18,24 @@ warn() { log "WARN: $*"; }
 die()  { log "ERROR: $*"; exit 1; }
 
 # load_env [required|optional] - export every KEY=VALUE from $ENV_FILE.
+# Variables already set in the environment win (same rule as docker compose),
+# so `N8N_VOLUME_NAME=x ./scripts/backup-n8n.sh` works as expected.
 load_env() {
-  local mode="${1:-optional}"
+  local mode="${1:-optional}" line key kv
+  local saved=()
   if [[ -f "$ENV_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)= ]] || continue
+      key="${BASH_REMATCH[1]}"
+      if [[ -n "${!key+x}" ]]; then saved+=("$key=${!key}"); fi
+    done < "$ENV_FILE"
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
+    for kv in "${saved[@]+"${saved[@]}"}"; do
+      export "${kv%%=*}=${kv#*=}"
+    done
   elif [[ "$mode" == "required" ]]; then
     die "env file not found: $ENV_FILE (cp .env.example .env and fill it in)"
   fi
