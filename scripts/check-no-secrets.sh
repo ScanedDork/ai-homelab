@@ -9,7 +9,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0")
 
-Scans files tracked by git (plus staged ones) for secrets and real IPs.
+Scans tracked, staged and untracked-but-not-ignored files for secrets and real IPs.
   -h, --help  Show this help
 EOF
 }
@@ -39,7 +39,7 @@ PATTERNS=(
 FILES=()
 while IFS= read -r f; do
   [[ "$f" == "$SELF" || ! -f "$f" ]] || FILES+=("$f")
-done < <( { git ls-files; git diff --cached --name-only; } | sort -u)
+done < <( { git ls-files --cached --others --exclude-standard; git diff --cached --name-only; } | sort -u)
 
 for entry in "${PATTERNS[@]}"; do
   label="${entry%%|*}"
