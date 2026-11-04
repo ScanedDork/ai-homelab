@@ -1,0 +1,33 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install linters
+        run: |
+          python3 -m pip install --user yamllint==1.35.1 shellcheck-py==0.10.0.1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Tool versions
+        run: |
+          yamllint --version
+          shellcheck --version | head -n 2
+          docker compose version
+          jq --version
+
+      - name: Lint (yamllint, shellcheck)
+        run: make lint
+
+      - name: Validate (docker compose config, JSON, plist, secret scan)
+        run: make validate
