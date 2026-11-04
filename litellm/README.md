@@ -25,8 +25,11 @@ docker run -d --name litellm --restart unless-stopped \
   -v "$PWD/litellm/config.yaml:/app/config.yaml:ro" \
   -e LITELLM_MASTER_KEY -e OLLAMA_API_BASE \
   -e GEMINI_API_KEY -e GROQ_API_KEY -e CEREBRAS_API_KEY -e OPENROUTER_API_KEY \
-  ghcr.io/berriai/litellm:main-stable --config /app/config.yaml --port 4000
+  "${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}" --config /app/config.yaml --port 4000
 ```
+
+The image is multi-arch (linux/amd64 + linux/arm64). Pin a version tag in
+`LITELLM_IMAGE` rather than tracking `main-stable` if you want reproducible updates.
 
 Check: `curl http://n8npi:4000/health/liveliness`. Restart after editing the
 config: `docker restart litellm`. Leave a provider key empty and that fallback
@@ -42,10 +45,22 @@ simply fails over to the next one.
   `default: local-chat` (see `hermes/README.md`). Use the master key (or a LiteLLM
   virtual key) as the API key.
 
+## What has been tested
+
+This config was run on LiteLLM 1.108.0 against local stubs:
+- It loads with no config warnings, and all 7 model groups are listed.
+- `/health/liveliness` answers without auth; `/v1/*` rejects requests without a key.
+- `local-chat` is served by Ollama when Ollama is up (0 fallbacks).
+- When Ollama is unreachable, `local-chat` falls back to the next group
+  (`x-litellm-attempted-fallbacks: 1`).
+- `local-embed` returns embeddings and, by design, never falls back.
+
 ## Verify before relying on it
 
-- Model IDs and free-tier limits (rpm/tpm) change; check each provider's console and
-  adjust `rpm`/`tpm` in `config.yaml`.
+- The cloud model IDs and free-tier limits (rpm/tpm) could not be checked against the
+  providers from the build environment, and these catalogues change. Run one request
+  per group (`"model": "groq-llama"` etc.) after adding keys, and adjust `rpm`/`tpm`
+  to your tier.
 - Free tiers may use your prompts for training (notably Gemini free tier). Keep
   sensitive prompts on `local-*` groups, which never leave the tailnet unless they fail over.
   For strictly local requests, call the Ollama model group without fallbacks or call

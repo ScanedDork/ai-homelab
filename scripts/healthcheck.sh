@@ -2,6 +2,7 @@
 # scripts/healthcheck.sh - check the homelab and print an OK/FAIL table.
 #
 # Checks: Tailscale backend state (if the CLI is on this host), n8n /healthz,
+# OpenClaw /healthz (when OPENCLAW_URL is set),
 # Ollama /api/version + required models, LiteLLM /health/liveliness.
 # Read-only and safe to run anywhere on the tailnet (Pi or Mac; bash 3.2 ok).
 # Exit code: 0 if nothing FAILed, 1 otherwise (SKIP does not fail).
@@ -16,7 +17,7 @@ usage() {
 Usage: $(basename "$0") [--env-file FILE] [--timeout SECONDS]
 
 Endpoints come from the env file (default: repo .env):
-  N8N_URL, OLLAMA_URL, LITELLM_URL, HEALTHCHECK_REQUIRED_MODELS
+  N8N_URL, OLLAMA_URL, LITELLM_URL, OPENCLAW_URL, HEALTHCHECK_REQUIRED_MODELS
 An empty URL marks that check SKIP.
 
   --env-file FILE   Use another env file
@@ -40,6 +41,7 @@ require_cmd curl
 N8N_URL="${N8N_URL-http://n8npi:5678}"
 OLLAMA_URL="${OLLAMA_URL-http://dorkmini:11434}"
 LITELLM_URL="${LITELLM_URL-http://n8npi:4000}"
+OPENCLAW_URL="${OPENCLAW_URL-}"
 REQUIRED_MODELS="${HEALTHCHECK_REQUIRED_MODELS-qwen3.5:4b}"
 
 NAMES=() STATES=() DETAILS=()
@@ -121,6 +123,7 @@ check_tailscale
 check_http n8n "${N8N_URL:+$N8N_URL/healthz}" '"ok"'
 check_ollama
 check_http litellm "${LITELLM_URL:+$LITELLM_URL/health/liveliness}" ""
+check_http openclaw "${OPENCLAW_URL:+$OPENCLAW_URL/healthz}" ""
 
 fails=0
 printf '%-14s %-6s %s\n' CHECK STATUS DETAIL
