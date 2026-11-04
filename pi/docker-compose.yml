@@ -1,0 +1,108 @@
+# n8n on n8npi (Raspberry Pi 4B, arm64).
+#
+# Run from the repo root so the shared .env is used:
+#   docker compose --env-file .env -f pi/docker-compose.yml up -d
+# (or simply `make up-pi`).
+#
+# Networking: the port is published ONLY on the Pi's Tailscale IP
+# (PI_TAILSCALE_IP), never 0.0.0.0. Docker must start after Tailscale has an IP;
+# see scripts/systemd/docker-wait-for-tailscale.conf.
+
+name: homelab-pi
+
+# --- Optional: multiple Hermes Agent containers ---------------------------
+# Uncomment this anchor AND the hermes-* services below. Each instance gets its
+# own config file and state volume; add an instance by copying a 4-line block
+# and bumping the number. TODOs: confirm image, container config path and
+# command for your Hermes Agent version before enabling.
+#
+# x-hermes: &hermes
+#   image: ${HERMES_IMAGE:?set HERMES_IMAGE in .env}
+#   platform: linux/arm64
+#   restart: unless-stopped
+#   init: true
+#   security_opt:
+#     - no-new-privileges:true
+#   environment:
+#     TZ: ${TZ:-Europe/Prague}
+#   # No ports: Hermes talks outbound (LiteLLM / Ollama / chat platforms).
+#   mem_limit: 512m
+#   logging:
+#     driver: json-file
+#     options:
+#       max-size: 10m
+#       max-file: "3"
+
+services:
+  n8n:
+    image: ${N8N_IMAGE:-docker.io/n8nio/n8n:latest}
+    platform: ${N8N_PLATFORM:-linux/arm64}
+    container_name: ${N8N_CONTAINER:-n8n}
+    restart: unless-stopped
+    ports:
+      - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${N8N_PORT:-5678}:5678"
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      GENERIC_TIMEZONE: ${TZ:-Europe/Prague}
+      N8N_HOST: ${N8N_HOST:-n8npi}
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8npi:5678/}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      # Keep secrets in env out of workflow expressions.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      # Never allow shell execution from workflows on the isolation box.
+      NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.localFileTrigger"]'
+      # File nodes may only read the backup status directory (workflow 3).
+      N8N_RESTRICT_FILE_ACCESS_TO: /home/node/backup-status
+      # Prune execution history to spare the SD card / SSD.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ${BACKUP_DIR:-/srv/n8n-backups}/status:/home/node/backup-status:ro
+    healthcheck:
+      # node is always present in the image; wget/curl may not be.
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          require('http').get('http://127.0.0.1:5678/healthz',
+          r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # --- Optional Hermes instances (see x-hermes anchor above) --------------
+  # hermes-1:
+  #   <<: *hermes
+  #   container_name: hermes-1
+  #   volumes:
+  #     - ../hermes/instances/hermes-1/config.yaml:/TODO-hermes-home/config.yaml:ro
+  #     - hermes_1_state:/TODO-hermes-home/state
+  #
+  # hermes-2:
+  #   <<: *hermes
+  #   container_name: hermes-2
+  #   volumes:
+  #     - ../hermes/instances/hermes-2/config.yaml:/TODO-hermes-home/config.yaml:ro
+  #     - hermes_2_state:/TODO-hermes-home/state
+
+volumes:
+  n8n_data:
+    name: ${N8N_VOLUME_NAME:-n8n_data}
+  # hermes_1_state: {}
+  # hermes_2_state: {}
