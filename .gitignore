@@ -9,6 +9,7 @@ backups/
 *.tar.gz.sha256
 *.partial
 hermes/config.yaml
+hermes/instances/
 mac/*.rendered.plist
 
 # Editor / OS noise

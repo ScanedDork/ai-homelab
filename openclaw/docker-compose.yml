@@ -1,0 +1,35 @@
+# OpenClaw AI gateway - PLACEHOLDER. Not deployable until the TODOs are resolved.
+# See openclaw/README.md for the parameters to fill in. The `openclaw` profile
+# keeps it from starting by accident:
+#   docker compose --env-file .env -f openclaw/docker-compose.yml --profile openclaw up -d
+
+name: homelab-openclaw
+
+services:
+  openclaw:
+    profiles: ["openclaw"]
+    # TODO: official image name/tag for your OpenClaw version (arm64 if on the Pi).
+    image: ${OPENCLAW_IMAGE:?set OPENCLAW_IMAGE in .env}
+    container_name: openclaw
+    restart: unless-stopped
+    ports:
+      # Tailscale IP of whichever host runs OpenClaw (TODO: n8npi or dorkmini?).
+      # TODO: confirm the container listens on 18789 internally.
+      - "${OPENCLAW_BIND_IP:?set OPENCLAW_BIND_IP in .env}:${OPENCLAW_PORT:-18789}:18789"
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      # TODO: gateway auth token / upstream model settings. Add the variable
+      # names from the OpenClaw docs here as ${VAR} references, values in .env.
+    volumes:
+      # TODO: in-container path where OpenClaw keeps config/state.
+      - openclaw_state:${OPENCLAW_STATE_PATH:?set OPENCLAW_STATE_PATH in .env}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  openclaw_state: {}

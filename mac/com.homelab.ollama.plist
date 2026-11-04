@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent for Ollama on dorkmini, bound to the Tailscale interface only.
+  This is a TEMPLATE: __OLLAMA_BIN__, __OLLAMA_BIND_IP__ and __LOG_DIR__ are
+  replaced by mac/install-ollama-launchd.sh. Do not load this file directly.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.homelab.ollama</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__OLLAMA_BIN__</string>
+    <string>serve</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Tailscale IP only: never 0.0.0.0, so the LAN cannot reach Ollama. -->
+    <key>OLLAMA_HOST</key>
+    <string>__OLLAMA_BIND_IP__:11434</string>
+    <key>OLLAMA_KEEP_ALIVE</key>
+    <string>10m</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- Restart if it exits, e.g. when the Tailscale IP was not up yet at login. -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/ollama.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/ollama.err.log</string>
+</dict>
+</plist>
