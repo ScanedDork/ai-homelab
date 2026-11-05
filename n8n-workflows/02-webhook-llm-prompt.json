@@ -1,4 +1,5 @@
 {
+  "id": "hlPromptHook0001",
   "name": "Homelab: prompt webhook -> LiteLLM",
   "nodes": [
     {
@@ -47,7 +48,7 @@
             {
               "id": "61bcf99e-05db-5828-bb90-4903fff3fe9d",
               "name": "litellm_url",
-              "value": "http://n8npi:4000",
+              "value": "http://litellm:4000",
               "type": "string"
             },
             {

@@ -10,6 +10,19 @@
 
 name: homelab-pi
 
+# Containers resolve the two devices through these fixed entries instead of
+# relying on MagicDNS working inside Docker (it often does not, e.g. with
+# systemd-resolved). Both IPs come from .env; `tailscale ip -4 <host>`.
+x-tailnet-hosts: &tailnet-hosts
+  - "dorkmini:${MAC_TAILSCALE_IP:?set MAC_TAILSCALE_IP in .env}"
+  - "n8npi:${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 # --- Optional: multiple Hermes Agent containers ---------------------------
 # Uncomment this anchor AND the hermes-* services below. Each instance gets its
 # own HERMES_HOME (/opt/data in the image): HERMES_DATA_ROOT/hermes-N on the
@@ -30,12 +43,10 @@ name: homelab-pi
 #     HERMES_UID: ${HERMES_UID:-1000}
 #     HERMES_GID: ${HERMES_GID:-1000}
 #   # No ports: the gateway only talks outbound (LiteLLM, Ollama, chat platforms).
+#   # Use base_url http://litellm:4000/v1 or http://dorkmini:11434/v1 in config.yaml.
+#   extra_hosts: *tailnet-hosts
 #   mem_limit: 768m
-#   logging:
-#     driver: json-file
-#     options:
-#       max-size: 10m
-#       max-file: "3"
+#   logging: *logging
 
 services:
   n8n:
@@ -45,6 +56,7 @@ services:
     restart: unless-stopped
     ports:
       - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${N8N_PORT:-5678}:5678"
+    extra_hosts: *tailnet-hosts
     environment:
       TZ: ${TZ:-Europe/Prague}
       GENERIC_TIMEZONE: ${TZ:-Europe/Prague}
@@ -87,13 +99,51 @@ services:
       start_period: 60s
     security_opt:
       - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
+    logging: *logging
 
-  # Web dashboard (dashboard/): status, models, LiteLLM playground.
+  # LiteLLM routing proxy (litellm/config.yaml): Ollama on dorkmini first,
+  # free-tier clouds as fallback. Other containers use http://litellm:4000;
+  # tailnet clients (e.g. Hermes on the Mac) use http://n8npi:4000.
+  litellm:
+    image: ${LITELLM_IMAGE:-docker.io/litellm/litellm:main-stable}
+    container_name: litellm
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${LITELLM_PORT:-4000}:4000"
+    extra_hosts: *tailnet-hosts
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://dorkmini:11434}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Use the price map bundled in the image instead of fetching it from
+      # GitHub at every start (works offline, no extra egress).
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    volumes:
+      - ../litellm/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request as u, sys;
+          r = u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5);
+          sys.exit(0 if r.status == 200 else 1)
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${LITELLM_MEM_LIMIT:-1g}
+    logging: *logging
+
+  # Web dashboard (dashboard/): status, tailnet, models, LiteLLM playground.
   # Tailscale-IP only; every /api call needs DASHBOARD_TOKEN. Only the variables
   # it needs are passed (not the whole .env).
   dashboard:
@@ -103,23 +153,29 @@ services:
     restart: unless-stopped
     depends_on:
       - n8n
+      - litellm
     ports:
       - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${DASHBOARD_PORT:-8080}:8080"
+    extra_hosts: *tailnet-hosts
     environment:
       TZ: ${TZ:-Europe/Prague}
       DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN in .env}
-      # n8n is reached over the compose network; N8N_URL is only the UI link.
+      # Compose-network URLs for checks; N8N_URL / OPENCLAW_URL are UI links.
       DASHBOARD_N8N_URL: http://n8n:5678
       N8N_URL: ${N8N_URL:-http://n8npi:5678}
       OLLAMA_URL: ${OLLAMA_URL:-http://dorkmini:11434}
-      LITELLM_URL: ${LITELLM_URL:-http://n8npi:4000}
+      LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       OPENCLAW_URL: ${OPENCLAW_URL:-}
       HEALTHCHECK_REQUIRED_MODELS: ${HEALTHCHECK_REQUIRED_MODELS:-qwen3.5:4b}
       BACKUP_STATUS_FILE: /data/backup-status/status.json
       BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-36}
+      TAILSCALE_SOCKET: /var/run/tailscale/tailscaled.sock
     volumes:
       - ${BACKUP_DIR:-/srv/n8n-backups}/status:/data/backup-status:ro
+      # Read-only tailnet status (devices online/offline). tailscaled only
+      # grants read access to a non-root uid like the dashboard's 10001.
+      - /var/run/tailscale:/var/run/tailscale:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m
@@ -128,11 +184,7 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 128m
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
+    logging: *logging
 
   # --- Optional Hermes instances (see x-hermes anchor above) --------------
   # hermes-1:

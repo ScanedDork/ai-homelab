@@ -1,4 +1,5 @@
 {
+  "id": "hlBackupReport01",
   "name": "Homelab: weekly backup status report",
   "nodes": [
     {

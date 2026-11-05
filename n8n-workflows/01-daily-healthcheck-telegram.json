@@ -1,9 +1,10 @@
 {
+  "id": "hlDailyHealth001",
   "name": "Homelab: daily healthcheck -> Telegram",
   "nodes": [
     {
       "parameters": {
-        "content": "## Daily homelab healthcheck\nRuns 08:00 Europe/Prague. Checks Ollama on dorkmini (and required models) and LiteLLM on n8npi, then sends a Telegram message.\n\nEdit **Config** after import: `telegram_chat_id`, URLs, `notify_on_success`.\nSelect your Telegram credential on **Send Telegram**.",
+        "content": "## Daily homelab healthcheck\nRuns 08:00 Europe/Prague. Checks Ollama on dorkmini (and required models) and LiteLLM on n8npi, then sends a Telegram message.\n\n`make provision` fills **Config** and credentials from .env. For a manual import, edit **Config** (`telegram_chat_id`, URLs) and pick the Telegram credential.",
         "height": 260,
         "width": 420
       },
@@ -54,7 +55,7 @@
             {
               "id": "851100ee-5e54-5fd8-b0e6-b6ecdd45ced5",
               "name": "litellm_url",
-              "value": "http://n8npi:4000",
+              "value": "http://litellm:4000",
               "type": "string"
             },
             {
