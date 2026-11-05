@@ -1,0 +1,15 @@
+# Sample crontab for n8npi (alternative to the systemd timer; use one, not both).
+# Install for a user in the docker group:  crontab -e  and paste, or
+#   crontab scripts/cron/homelab.crontab   (replaces that user's crontab!)
+# Repo assumed at /opt/ai-homelab. Times are the Pi's local time (Europe/Prague).
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Nightly backup at 03:15
+15 3 * * * /opt/ai-homelab/scripts/backup-n8n.sh >> /var/tmp/n8n-backup.log 2>&1
+
+# Hourly health log (the n8n workflow handles Telegram alerting)
+5 * * * * /opt/ai-homelab/scripts/healthcheck.sh >> /var/tmp/homelab-health.log 2>&1
+
+# Optional: weekly update Sunday 04:30, after the backup (rolls back on failure)
+# 30 4 * * 0 /opt/ai-homelab/scripts/update.sh >> /var/tmp/n8n-update.log 2>&1

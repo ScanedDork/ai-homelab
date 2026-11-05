@@ -1,0 +1,60 @@
+# OpenClaw AI gateway, adapted from the upstream compose file
+# (github.com/openclaw/openclaw, docker-compose.yml) for this homelab:
+#   - official multi-arch image (linux/amd64 + linux/arm64), so it runs on
+#     n8npi or dorkmini
+#   - published ONLY on that host's Tailscale IP (OPENCLAW_BIND_IP), never 0.0.0.0
+#   - only the gateway port; the bridge (18790) and MS Teams (3978) ports are
+#     left unpublished until you need them
+#
+# Run from the repo root:
+#   docker compose --env-file .env -f openclaw/docker-compose.yml up -d
+# First-time onboarding: see openclaw/README.md.
+
+name: homelab-openclaw
+
+services:
+  openclaw-gateway:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    container_name: openclaw-gateway
+    restart: unless-stopped
+    init: true
+    environment:
+      HOME: /home/node
+      OPENCLAW_HOME: /home/node
+      TERM: xterm-256color
+      # Container-side paths are pinned (upstream does the same so host paths
+      # can never leak into the runtime).
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+      OPENCLAW_GATEWAY_PORT: "18789"
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?set OPENCLAW_GATEWAY_TOKEN in .env}
+      # mDNS does not cross the Docker bridge; Tailscale is the discovery path.
+      OPENCLAW_DISABLE_BONJOUR: "1"
+      TZ: ${TZ:-Europe/Prague}
+    volumes:
+      - "${OPENCLAW_HOST_CONFIG_DIR:-/srv/openclaw/config}:/home/node/.openclaw"
+      - "${OPENCLAW_HOST_WORKSPACE_DIR:-/srv/openclaw/workspace}:/home/node/.openclaw/workspace"
+      - "${OPENCLAW_HOST_SECRETS_DIR:-/srv/openclaw/auth-secrets}:/home/node/.config/openclaw"
+    ports:
+      - "${OPENCLAW_BIND_IP:?set OPENCLAW_BIND_IP in .env}:${OPENCLAW_PORT:-18789}:18789"
+    # `lan` is the bind mode *inside* the container; it is required for Docker
+    # port publishing. Host-side exposure is limited by `ports:` above.
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
+    healthcheck:
+      test: ["CMD", "node", "dist/docker-healthcheck.js"]   # pings /healthz
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

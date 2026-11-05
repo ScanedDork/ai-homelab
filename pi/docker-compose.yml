@@ -1,0 +1,204 @@
+# n8n on n8npi (Raspberry Pi 4B, arm64).
+#
+# Run from the repo root so the shared .env is used:
+#   docker compose --env-file .env -f pi/docker-compose.yml up -d
+# (or simply `make up-pi`).
+#
+# Networking: the port is published ONLY on the Pi's Tailscale IP
+# (PI_TAILSCALE_IP), never 0.0.0.0. Docker must start after Tailscale has an IP;
+# see scripts/systemd/docker-wait-for-tailscale.conf.
+
+name: homelab-pi
+
+# Containers resolve the two devices through these fixed entries instead of
+# relying on MagicDNS working inside Docker (it often does not, e.g. with
+# systemd-resolved). Both IPs come from .env; `tailscale ip -4 <host>`.
+x-tailnet-hosts: &tailnet-hosts
+  - "dorkmini:${MAC_TAILSCALE_IP:?set MAC_TAILSCALE_IP in .env}"
+  - "n8npi:${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+# --- Optional: multiple Hermes Agent containers ---------------------------
+# Uncomment this anchor AND the hermes-* services below. Each instance gets its
+# own HERMES_HOME (/opt/data in the image): HERMES_DATA_ROOT/hermes-N on the
+# host, holding that instance's config.yaml, .env and state. Never share one
+# directory between instances (upstream: they would contend for one lock).
+# Add an instance by copying a 5-line block and bumping the number.
+# Image facts (nousresearch/hermes-agent): multi-arch, entrypoint dispatches
+# `hermes <args>`, starts as root and drops to a hermes user remapped to
+# HERMES_UID/HERMES_GID, keeps everything under /opt/data.
+#
+# x-hermes: &hermes
+#   image: ${HERMES_IMAGE:-docker.io/nousresearch/hermes-agent:latest}
+#   platform: linux/arm64
+#   restart: unless-stopped
+#   command: ["gateway", "run"]
+#   environment:
+#     TZ: ${TZ:-Europe/Prague}
+#     HERMES_UID: ${HERMES_UID:-1000}
+#     HERMES_GID: ${HERMES_GID:-1000}
+#   # No ports: the gateway only talks outbound (LiteLLM, Ollama, chat platforms).
+#   # Use base_url http://litellm:4000/v1 or http://dorkmini:11434/v1 in config.yaml.
+#   extra_hosts: *tailnet-hosts
+#   mem_limit: 768m
+#   logging: *logging
+
+services:
+  n8n:
+    image: ${N8N_IMAGE:-docker.io/n8nio/n8n:latest}
+    platform: ${N8N_PLATFORM:-linux/arm64}
+    container_name: ${N8N_CONTAINER:-n8n}
+    restart: unless-stopped
+    ports:
+      - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${N8N_PORT:-5678}:5678"
+    extra_hosts: *tailnet-hosts
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      GENERIC_TIMEZONE: ${TZ:-Europe/Prague}
+      N8N_HOST: ${N8N_HOST:-n8npi}
+      N8N_PORT: "5678"
+      # Inside the container only; host exposure is limited by `ports:` above.
+      # n8n defaults to '::', which crash-loops on hosts with IPv6 disabled.
+      N8N_LISTEN_ADDRESS: 0.0.0.0
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8npi:5678/}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      # Keep secrets in env out of workflow expressions.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      # Never allow shell execution from workflows on the isolation box.
+      NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.localFileTrigger"]'
+      # File nodes may only read the backup status directory (workflow 3).
+      N8N_RESTRICT_FILE_ACCESS_TO: /home/node/backup-status
+      # Prune execution history to spare the SD card / SSD.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ${BACKUP_DIR:-/srv/n8n-backups}/status:/home/node/backup-status:ro
+    healthcheck:
+      # node is always present in the image; wget/curl may not be.
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          require('http').get('http://127.0.0.1:5678/healthz',
+          r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+  # LiteLLM routing proxy (litellm/config.yaml): Ollama on dorkmini first,
+  # free-tier clouds as fallback. Other containers use http://litellm:4000;
+  # tailnet clients (e.g. Hermes on the Mac) use http://n8npi:4000.
+  litellm:
+    image: ${LITELLM_IMAGE:-docker.io/litellm/litellm:main-stable}
+    container_name: litellm
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${LITELLM_PORT:-4000}:4000"
+    extra_hosts: *tailnet-hosts
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://dorkmini:11434}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Use the price map bundled in the image instead of fetching it from
+      # GitHub at every start (works offline, no extra egress).
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    volumes:
+      - ../litellm/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request as u, sys;
+          r = u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5);
+          sys.exit(0 if r.status == 200 else 1)
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${LITELLM_MEM_LIMIT:-1g}
+    logging: *logging
+
+  # Web dashboard (dashboard/): status, tailnet, models, LiteLLM playground.
+  # Tailscale-IP only; every /api call needs DASHBOARD_TOKEN. Only the variables
+  # it needs are passed (not the whole .env).
+  dashboard:
+    build: ../dashboard
+    image: homelab-dashboard:local
+    container_name: homelab-dashboard
+    restart: unless-stopped
+    depends_on:
+      - n8n
+      - litellm
+    ports:
+      - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${DASHBOARD_PORT:-8080}:8080"
+    extra_hosts: *tailnet-hosts
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN in .env}
+      # Compose-network URLs for checks; N8N_URL / OPENCLAW_URL are UI links.
+      DASHBOARD_N8N_URL: http://n8n:5678
+      N8N_URL: ${N8N_URL:-http://n8npi:5678}
+      OLLAMA_URL: ${OLLAMA_URL:-http://dorkmini:11434}
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      OPENCLAW_URL: ${OPENCLAW_URL:-}
+      HEALTHCHECK_REQUIRED_MODELS: ${HEALTHCHECK_REQUIRED_MODELS:-qwen3.5:4b}
+      BACKUP_STATUS_FILE: /data/backup-status/status.json
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-36}
+      TAILSCALE_SOCKET: /var/run/tailscale/tailscaled.sock
+    volumes:
+      - ${BACKUP_DIR:-/srv/n8n-backups}/status:/data/backup-status:ro
+      # Read-only tailnet status (devices online/offline). tailscaled only
+      # grants read access to a non-root uid like the dashboard's 10001.
+      - /var/run/tailscale:/var/run/tailscale:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    logging: *logging
+
+  # --- Optional Hermes instances (see x-hermes anchor above) --------------
+  # hermes-1:
+  #   <<: *hermes
+  #   container_name: hermes-1
+  #   volumes:
+  #     - ${HERMES_DATA_ROOT:-/srv/hermes}/hermes-1:/opt/data
+  #
+  # hermes-2:
+  #   <<: *hermes
+  #   container_name: hermes-2
+  #   volumes:
+  #     - ${HERMES_DATA_ROOT:-/srv/hermes}/hermes-2:/opt/data
+
+volumes:
+  n8n_data:
+    name: ${N8N_VOLUME_NAME:-n8n_data}
