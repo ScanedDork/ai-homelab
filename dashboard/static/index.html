@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Homelab Dashboard</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="favicon.svg" alt="" width="28" height="28">
+      <div>
+        <h1>ai-homelab</h1>
+        <p class="muted small">Tailscale-only dashboard</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="overall" class="pill pill-SKIP" aria-live="polite">Loading…</span>
+      <span id="updated" class="muted small"></span>
+      <button id="refresh" class="btn" type="button" title="Refresh now">Refresh</button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Sections">
+    <a href="#overview" data-tab="overview" class="tab">Overview</a>
+    <a href="#models" data-tab="models" class="tab">Models</a>
+    <a href="#playground" data-tab="playground" class="tab">Playground</a>
+  </nav>
+
+  <main>
+    <!-- Overview ------------------------------------------------------- -->
+    <section id="view-overview" class="view">
+      <div id="counts" class="counts"></div>
+      <div id="devices" class="devices"></div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Backups</h2>
+          <span class="muted small">from <code>BACKUP_DIR/status/status.json</code></span>
+        </div>
+        <dl id="backups" class="kv"></dl>
+      </div>
+    </section>
+
+    <!-- Models --------------------------------------------------------- -->
+    <section id="view-models" class="view" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Ollama models</h2>
+          <span id="ollama-url" class="muted small"></span>
+        </div>
+        <div id="ollama-alert"></div>
+        <div class="table-wrap">
+          <table id="models-table">
+            <thead>
+              <tr><th>Model</th><th>Params</th><th>Quant</th><th class="num">Size</th><th>State</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>LiteLLM model groups</h2>
+          <span class="muted small"><code>local-chat</code> and <code>local-small</code> fall back to cloud free tiers</span>
+        </div>
+        <div id="groups" class="chips"></div>
+      </div>
+    </section>
+
+    <!-- Playground ----------------------------------------------------- -->
+    <section id="view-playground" class="view playground" hidden>
+      <aside class="panel settings">
+        <h2>Settings</h2>
+        <label for="model">Model group</label>
+        <select id="model"></select>
+        <label for="temperature">Temperature <output id="temp-out">0.7</output></label>
+        <input id="temperature" type="range" min="0" max="2" step="0.1" value="0.7">
+        <label for="system">System prompt <span class="muted small">(optional)</span></label>
+        <textarea id="system" rows="4" placeholder="You are a concise assistant."></textarea>
+        <button id="clear" class="btn btn-ghost" type="button">Clear conversation</button>
+        <p class="muted small">Requests go to LiteLLM on the Pi. <code>local-*</code> groups stay on
+          dorkmini unless they fail over to the cloud; the reply shows which group answered.</p>
+      </aside>
+      <div class="panel chat">
+        <div id="transcript" class="transcript" aria-live="polite">
+          <p class="empty muted">Ask something to test routing through LiteLLM.</p>
+        </div>
+        <form id="composer" class="composer">
+          <textarea id="prompt" rows="2" placeholder="Message… (Enter to send, Shift+Enter for a new line)"
+                    required></textarea>
+          <button id="send" class="btn btn-primary" type="submit">Send</button>
+          <button id="stop" class="btn" type="button" hidden>Stop</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="muted small">
+    <span id="version"></span> · <a id="link-n8n" href="#" target="_blank" rel="noopener noreferrer">n8n</a>
+    <span id="link-openclaw-wrap" hidden> · <a id="link-openclaw" href="#" target="_blank" rel="noopener noreferrer">OpenClaw</a></span>
+    · <button id="forget-token" class="linklike" type="button">Forget token</button>
+  </footer>
+
+  <dialog id="token-dialog">
+    <form method="dialog" id="token-form">
+      <h2>Dashboard token</h2>
+      <p class="muted small">Enter <code>DASHBOARD_TOKEN</code> from the homelab <code>.env</code>.
+        It is stored only in this browser.</p>
+      <input id="token-input" type="password" autocomplete="current-password" required minlength="16">
+      <p id="token-error" class="error small" hidden></p>
+      <div class="dialog-actions"><button class="btn btn-primary" value="save">Save</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
