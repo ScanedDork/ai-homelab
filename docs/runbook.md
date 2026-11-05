@@ -77,6 +77,23 @@ your tier allows. Check model IDs still exist (free catalogues change).
 
 **401 from LiteLLM.** The client is not sending `Authorization: Bearer $LITELLM_MASTER_KEY`.
 
+## Dashboard
+
+**Container exits with `config error: DASHBOARD_TOKEN ...`.** Set a real token in `.env`
+(`openssl rand -hex 32`), then `make up-pi`.
+
+**Page keeps asking for the token.** The token in the browser differs from `.env`
+(e.g. after rotating it). Enter the new one; "Forget token" clears the old one.
+
+**Dashboard shows FAIL but `make health` on the Pi is OK.** The container cannot
+resolve MagicDNS names; see the `ENOTFOUND` item above (same fix as n8n).
+
+**Backups show WARN "no status file yet".** Run `make backup` once; the dashboard reads
+`BACKUP_DIR/status/status.json` read-only.
+
+**Changes to `dashboard/` not visible.** `make up-pi` rebuilds the image; a plain
+`docker compose up -d` does not.
+
 ## OpenClaw
 
 **Container unhealthy right after first start.** Onboarding has not run; follow

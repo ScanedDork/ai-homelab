@@ -25,9 +25,17 @@ jobs:
           shellcheck --version | head -n 2
           docker compose version
           jq --version
+          python3 --version
+          node --version
 
       - name: Lint (yamllint, shellcheck)
         run: make lint
 
       - name: Validate (docker compose config, JSON, plist, secret scan)
         run: make validate
+
+      - name: Dashboard tests (Python unittest, JS syntax)
+        run: make test
+
+      - name: Build dashboard image
+        run: make build-dashboard

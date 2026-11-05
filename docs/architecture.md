@@ -6,7 +6,7 @@ replaced by Tailscale on purpose; do not reintroduce it.
 
 | Device | Role | Runs | Listens on (Tailscale IP only) |
 |---|---|---|---|
-| `n8npi`, Raspberry Pi 4B, arm64, always on | Automation + routing, isolated from the Mac | n8n (Docker), LiteLLM (Docker, manual), optional Hermes containers | 5678 n8n, 4000 LiteLLM |
+| `n8npi`, Raspberry Pi 4B, arm64, always on | Automation + routing, isolated from the Mac | n8n + dashboard (Docker), LiteLLM (Docker, manual), optional Hermes containers | 5678 n8n, 8080 dashboard, 4000 LiteLLM |
 | `dorkmini`, Mac Mini | Inference | Ollama (launchd, native for Metal GPU), larger models | 11434 Ollama |
 | `n8npi` (recommended) | AI gateway | OpenClaw (Docker, optional) | 18789 |
 
@@ -23,7 +23,10 @@ replaced by Tailscale on purpose; do not reintroduce it.
    JSON response.
 5. **Monitoring**: n8n schedules → HTTP checks → Telegram Bot API (outbound only).
    `scripts/healthcheck.sh` gives the same view from a shell.
-6. **Backups**: systemd timer on the Pi → `backup-n8n.sh` → `/srv/n8n-backups`
+6. **Dashboard**: browser → `n8npi:8080` (Bearer token) → the dashboard server makes
+   the same checks server-side and proxies chat to LiteLLM, so neither Ollama nor the
+   LiteLLM key is ever exposed to the browser. See `dashboard/README.md`.
+7. **Backups**: systemd timer on the Pi → `backup-n8n.sh` → `/srv/n8n-backups`
    (+ `status/status.json`, mounted read-only into n8n for the weekly report).
 
 ## Why this split

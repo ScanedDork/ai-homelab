@@ -15,6 +15,7 @@ flowchart LR
       hpi["Hermes containers<br/>optional, commented out"]
       bk[("/srv/n8n-backups<br/>systemd timer")]
       oc["OpenClaw gateway :18789<br/>Docker, optional"]
+      dash["Dashboard :8080<br/>Docker, token auth"]
     end
     subgraph mac["dorkmini: Mac Mini"]
       ollama["Ollama :11434<br/>launchd, TS IP only"]
@@ -26,6 +27,10 @@ flowchart LR
 
   you -->|UI, webhooks| n8n
   you --> oc
+  you -->|status, chat| dash
+  dash -.->|checks| n8n
+  dash -->|chat, models| litellm
+  dash -.->|checks, models| ollama
   n8n -->|/v1/chat/completions| litellm
   litellm -->|primary| ollama
   litellm -.->|fallback| cloud
@@ -45,7 +50,8 @@ fallbacks, Telegram, and image pulls. Details: [docs/architecture.md](docs/archi
 
 | Path | What |
 |---|---|
-| `pi/docker-compose.yml` | n8n (arm64, healthcheck, restart policy, named volume, Europe/Prague, Tailscale-IP bind) + commented, scalable Hermes block |
+| `pi/docker-compose.yml` | n8n (arm64, healthcheck, restart policy, named volume, Europe/Prague, Tailscale-IP bind), the dashboard, and a commented, scalable Hermes block |
+| `dashboard/` | Web dashboard: service status by device, models, LiteLLM chat playground (stdlib Python + vanilla JS, tests) |
 | `mac/` | Ollama LaunchAgent template, installer that binds `OLLAMA_HOST` to the Tailscale IP, model pull script, notes |
 | `litellm/` | Proxy config (local first, free-tier fallbacks, rate-limit settings) + run/usage notes |
 | `hermes/` | `config.yaml.template` (dorkmini base URL, `qwen3.5:4b`) + model-switching notes |
@@ -53,8 +59,8 @@ fallbacks, Telegram, and image pulls. Details: [docs/architecture.md](docs/archi
 | `scripts/` | `healthcheck.sh`, `backup-n8n.sh`, `restore-n8n.sh`, `update.sh`, validators, `systemd/` timer + Docker drop-in, `cron/` sample |
 | `n8n-workflows/` | Importable: daily healthcheck → Telegram, prompt webhook → LiteLLM, weekly backup report |
 | `docs/` | architecture, tailscale (ACLs), security checklist, runbook, models, storage migration plan |
-| `Makefile` | `lint`, `validate`, `up-pi`, `down-pi`, `backup`, `health` |
-| `.github/workflows/validate.yml` | CI: yamllint, shellcheck, `docker compose config`, JSON/plist validation, secret scan |
+| `Makefile` | `lint`, `validate`, `test`, `build-dashboard`, `dashboard-dev`, `up-pi`, `down-pi`, `backup`, `health` |
+| `.github/workflows/validate.yml` | CI: yamllint, shellcheck, `docker compose config`, JSON/plist validation, secret scan, dashboard tests + image build |
 
 Every script supports `--help`.
 
@@ -66,9 +72,11 @@ On **n8npi** (repo at `/opt/ai-homelab`):
 cp .env.example .env && chmod 600 .env   # fill in PI_TAILSCALE_IP, N8N_ENCRYPTION_KEY, ...
 sudo install -d -o "$USER" -g "$USER" /srv/n8n-backups/status
 make validate
-make up-pi
+make up-pi        # n8n + dashboard
 make health
 ```
+
+Then open the dashboard at `http://n8npi:8080/` and enter `DASHBOARD_TOKEN` ([dashboard/README.md](dashboard/README.md)).
 
 On **dorkmini**:
 
@@ -85,12 +93,14 @@ Then follow the first-deployment checklist below.
    volume and copy its key from `/home/node/.n8n/config` into `N8N_ENCRYPTION_KEY`.
    Stop the old container (`docker stop <old>`) so port 5678 and the name `n8n` are free.
 2. Fill `.env`: `PI_TAILSCALE_IP`, `MAC_TAILSCALE_IP` (`tailscale ip -4` on each),
-   the encryption key, LiteLLM master key and any provider keys.
+   the encryption key, `DASHBOARD_TOKEN` (`openssl rand -hex 32`), the LiteLLM master
+   key and any provider keys.
 3. Pi: install `scripts/systemd/docker-wait-for-tailscale.conf`, then `make up-pi`;
    open `http://n8npi:5678`.
 4. Mac: quit Ollama.app and remove its login item, run the two `mac/` scripts, and
    check `lsof -nP -iTCP:11434 -sTCP:LISTEN` shows only the 100.x address.
-5. Pi: start LiteLLM (`litellm/README.md`); `make health` should be all OK.
+5. Pi: start LiteLLM (`litellm/README.md`); `make health` should be all OK, and the
+   dashboard at `http://n8npi:8080/` should show every service green.
 6. n8n: create credentials (Telegram bot, two Header Auth), import the three
    workflows, edit each **Config** node (Telegram chat ID), then activate (publish) them.
 7. Enable the backup timer (`scripts/systemd/n8n-backup@.service` header), run
@@ -115,8 +125,9 @@ Then follow the first-deployment checklist below.
 ## Common commands
 
 ```bash
-make lint validate      # what CI runs
-make health             # OK/FAIL table
+make lint validate test # what CI runs (plus the dashboard image build)
+make health             # OK/FAIL table (the dashboard shows the same, live)
+make dashboard-dev      # run the dashboard locally without Docker
 make backup             # backup now (rotates to BACKUP_RETENTION)
 ./scripts/update.sh     # pull + restart n8n, rollback if unhealthy
 ./scripts/restore-n8n.sh --latest

@@ -17,3 +17,7 @@ mac/*.rendered.plist
 .vscode/
 .idea/
 *.swp
+
+# Python
+__pycache__/
+*.pyc

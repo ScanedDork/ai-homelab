@@ -16,6 +16,7 @@
 | Service | Port | Exposed to | Never |
 |---|---|---|---|
 | n8n UI + webhooks | 5678 on n8npi | your admin devices | LAN, Funnel, public DNS |
+| Dashboard | 8080 on n8npi | your admin devices | LAN, Funnel |
 | LiteLLM | 4000 on n8npi | n8npi itself, admin devices, Hermes hosts | LAN, Funnel |
 | Ollama | 11434 on dorkmini | n8npi, Hermes hosts, admin devices | LAN, Funnel, `0.0.0.0` bind |
 | OpenClaw | 18789 on n8npi (recommended host) | admin devices | Funnel (OpenClaw's own `tailscale.mode: funnel` included), LAN |
@@ -43,7 +44,7 @@ disables its key expiry and detaches it from your user; re-authenticate with
   "acls": [
     // You (admins) can reach the service ports and SSH.
     { "action": "accept", "src": ["autogroup:admin"],
-      "dst": ["tag:homelab-pi:22,5678,4000,18789", "tag:homelab-mac:22,11434"] },
+      "dst": ["tag:homelab-pi:22,5678,8080,4000,18789", "tag:homelab-mac:22,11434"] },
     // The Pi (n8n, LiteLLM, Hermes containers) may call Ollama, nothing else.
     { "action": "accept", "src": ["tag:homelab-pi"], "dst": ["tag:homelab-mac:11434"] }
     // If OpenClaw runs on dorkmini instead, move 18789 to the tag:homelab-mac entry.

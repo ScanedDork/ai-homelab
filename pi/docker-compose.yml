@@ -93,6 +93,47 @@ services:
         max-size: 10m
         max-file: "3"
 
+  # Web dashboard (dashboard/): status, models, LiteLLM playground.
+  # Tailscale-IP only; every /api call needs DASHBOARD_TOKEN. Only the variables
+  # it needs are passed (not the whole .env).
+  dashboard:
+    build: ../dashboard
+    image: homelab-dashboard:local
+    container_name: homelab-dashboard
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    ports:
+      - "${PI_TAILSCALE_IP:?set PI_TAILSCALE_IP in .env}:${DASHBOARD_PORT:-8080}:8080"
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN in .env}
+      # n8n is reached over the compose network; N8N_URL is only the UI link.
+      DASHBOARD_N8N_URL: http://n8n:5678
+      N8N_URL: ${N8N_URL:-http://n8npi:5678}
+      OLLAMA_URL: ${OLLAMA_URL:-http://dorkmini:11434}
+      LITELLM_URL: ${LITELLM_URL:-http://n8npi:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      OPENCLAW_URL: ${OPENCLAW_URL:-}
+      HEALTHCHECK_REQUIRED_MODELS: ${HEALTHCHECK_REQUIRED_MODELS:-qwen3.5:4b}
+      BACKUP_STATUS_FILE: /data/backup-status/status.json
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-36}
+    volumes:
+      - ${BACKUP_DIR:-/srv/n8n-backups}/status:/data/backup-status:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   # --- Optional Hermes instances (see x-hermes anchor above) --------------
   # hermes-1:
   #   <<: *hermes
