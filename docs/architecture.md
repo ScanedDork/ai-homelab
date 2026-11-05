@@ -6,7 +6,7 @@ replaced by Tailscale on purpose; do not reintroduce it.
 
 | Device | Role | Runs | Listens on (Tailscale IP only) |
 |---|---|---|---|
-| `n8npi`, Raspberry Pi 4B, arm64, always on | Automation + routing, isolated from the Mac | n8n + dashboard (Docker), LiteLLM (Docker, manual), optional Hermes containers | 5678 n8n, 8080 dashboard, 4000 LiteLLM |
+| `n8npi`, Raspberry Pi 4B, arm64, always on | Automation + routing, isolated from the Mac | n8n, LiteLLM, dashboard (one compose stack), optional Hermes containers | 5678 n8n, 4000 LiteLLM, 8080 dashboard |
 | `dorkmini`, Mac Mini | Inference | Ollama (launchd, native for Metal GPU), larger models | 11434 Ollama |
 | `n8npi` (recommended) | AI gateway | OpenClaw (Docker, optional) | 18789 |
 
@@ -39,6 +39,21 @@ replaced by Tailscale on purpose; do not reintroduce it.
   speed; the Pi can only run the tiny ones (see `models.md`).
 - **Bind to Tailscale IPs, not 0.0.0.0**: LAN devices and anything that bypasses the
   host firewall (Docker publishes ports around ufw) cannot reach the services.
+
+## Name resolution inside containers
+
+Containers on the Pi do not rely on MagicDNS. `pi/docker-compose.yml` adds
+`dorkmini` and `n8npi` as fixed host entries built from `MAC_TAILSCALE_IP` and
+`PI_TAILSCALE_IP`, which are stable per device. Services on the same stack talk over
+the compose network (`http://n8n:5678`, `http://litellm:4000`). Host-side scripts
+use MagicDNS as usual.
+
+## Lifecycle
+
+`make install` bootstraps `.env`, secrets, directories and systemd units.
+`make up-pi` runs preflight, then starts the stack. `make provision` creates n8n
+credentials and workflows from `.env`. `make update` updates images with rollback.
+All of them are idempotent.
 
 ## Configuration sources
 

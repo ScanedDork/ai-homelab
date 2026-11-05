@@ -15,39 +15,36 @@ Cloud groups (`gemini-flash`, `groq-llama`, …) can also be requested directly.
 
 ## Run (on n8npi)
 
-LiteLLM is not part of `pi/docker-compose.yml`; start it by hand. Only the
-variables it needs are passed, not the whole `.env`:
+LiteLLM is the `litellm` service in `pi/docker-compose.yml`, so `make up-pi` starts
+it, `make update` updates it (with rollback), and Docker health-checks
+`/health/liveliness`. It gets only the variables it needs: `LITELLM_MASTER_KEY`,
+`OLLAMA_API_BASE` and the four provider keys. `dorkmini` resolves inside the
+container through the fixed host entry built from `MAC_TAILSCALE_IP`.
 
-```bash
-set -a; . ./.env; set +a
-docker run -d --name litellm --restart unless-stopped \
-  -p "${PI_TAILSCALE_IP}:4000:4000" \
-  -v "$PWD/litellm/config.yaml:/app/config.yaml:ro" \
-  -e LITELLM_MASTER_KEY -e OLLAMA_API_BASE \
-  -e GEMINI_API_KEY -e GROQ_API_KEY -e CEREBRAS_API_KEY -e OPENROUTER_API_KEY \
-  "${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}" --config /app/config.yaml --port 4000
-```
-
-The image is multi-arch (linux/amd64 + linux/arm64). Pin a version tag in
-`LITELLM_IMAGE` rather than tracking `main-stable` if you want reproducible updates.
-
-Check: `curl http://n8npi:4000/health/liveliness`. Restart after editing the
-config: `docker restart litellm`. Leave a provider key empty and that fallback
-simply fails over to the next one.
+- Image: `LITELLM_IMAGE` (default `docker.io/litellm/litellm:main-stable`, multi-arch,
+  the same build as `ghcr.io/berriai/litellm`). Pin a version tag for reproducible
+  updates. `LITELLM_LOCAL_MODEL_COST_MAP=True` stops it fetching the price map from
+  GitHub at every start.
+- After editing `config.yaml`: `docker restart litellm`.
+- Check: `curl http://n8npi:4000/health/liveliness`, or the dashboard's Overview.
+- A provider whose key is empty is still tried during fallback and fails fast. Add at
+  least one key so the Pi still answers while dorkmini sleeps.
 
 ## Pointing clients at it
 
-- **n8n**: HTTP Request node → `POST http://n8npi:4000/v1/chat/completions` with a
-  Header Auth credential `Authorization: Bearer <LITELLM_MASTER_KEY>`; see
+- **n8n** (same compose network): HTTP Request node → `POST http://litellm:4000/v1/chat/completions`
+  with the "LiteLLM master key" credential that `make provision` creates; see
   `n8n-workflows/02-webhook-llm-prompt.json`. n8n's OpenAI Chat Model node also works
-  with Base URL `http://n8npi:4000/v1`.
+  with Base URL `http://litellm:4000/v1`.
+- **Dashboard**: uses `http://litellm:4000` server-side (Playground tab).
 - **Hermes**: in `~/.hermes/config.yaml` set `base_url: http://n8npi:4000/v1` and
   `default: local-chat` (see `hermes/README.md`). Use the master key (or a LiteLLM
   virtual key) as the API key.
 
 ## What has been tested
 
-This config was run on LiteLLM 1.108.0 against local stubs:
+This config was run on LiteLLM 1.108.0, both from pip and as the `litellm` compose
+service (real image), against local stubs:
 - It loads with no config warnings, and all 7 model groups are listed.
 - `/health/liveliness` answers without auth; `/v1/*` rejects requests without a key.
 - `local-chat` is served by Ollama when Ollama is up (0 fallbacks).

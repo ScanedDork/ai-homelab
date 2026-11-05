@@ -6,6 +6,7 @@ Standard library only; every upstream is a local stub on a random port.
 
 import json
 import os
+import socketserver
 import sys
 import tempfile
 import threading
@@ -106,6 +107,7 @@ class DashboardTest(unittest.TestCase):
             "BACKUP_STATUS_FILE": str(cls.status_file),
             "DASHBOARD_CACHE_SECONDS": "0",
             "DASHBOARD_ACCESS_LOG": "0",
+            "TAILSCALE_SOCKET": str(Path(tempfile.gettempdir()) / "no-such-tailscaled.sock"),
         }
         cls.cfg = server.Config(env)
         cls.app = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(cls.cfg))
@@ -114,7 +116,9 @@ class DashboardTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.app.shutdown()
+        cls.app.server_close()
         cls.stub.shutdown()
+        cls.stub.server_close()
         cls.tmp.cleanup()
 
     def setUp(self):
@@ -298,6 +302,113 @@ class DashboardTest(unittest.TestCase):
         finally:
             os.environ.clear()
             os.environ.update(old)
+
+
+TAILSCALE_STATUS = {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "tail1234.ts.net",
+    "CurrentTailnet": {"Name": "example.github"},
+    "Self": {"HostName": "n8npi", "DNSName": "n8npi.tail1234.ts.net.", "OS": "linux",
+             "TailscaleIPs": ["fd7a:115c:a1e0::1"], "Online": True},
+    "Peer": {
+        "nodekey:a": {"HostName": "Dorks-Mac-mini", "DNSName": "dorkmini.tail1234.ts.net.", "OS": "macOS",
+                      "TailscaleIPs": ["fd7a:115c:a1e0::2"], "Online": True, "LastSeen": "0001-01-01T00:00:00Z"},
+        "nodekey:b": {"HostName": "phone", "DNSName": "phone.tail1234.ts.net.", "OS": "iOS",
+                      "TailscaleIPs": ["fd7a:115c:a1e0::3"], "Online": False, "LastSeen": "2026-11-01T10:00:00Z"},
+    },
+}
+
+
+class FakeTailscaled(BaseHTTPRequestHandler):
+    status = TAILSCALE_STATUS
+    seen = []
+
+    def log_message(self, *a):
+        pass
+
+    def address_string(self):
+        return "unix"
+
+    def do_GET(self):
+        FakeTailscaled.seen.append((self.path, self.headers.get("Sec-Tailscale")))
+        body = json.dumps(FakeTailscaled.status).encode()
+        self.send_response(200 if self.path == "/localapi/v0/status" else 404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+
+class TailnetTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.sock = str(Path(cls.tmp.name) / "tailscaled.sock")
+        cls.srv = UnixHTTPServer(cls.sock, FakeTailscaled)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        FakeTailscaled.status = json.loads(json.dumps(TAILSCALE_STATUS))
+        FakeTailscaled.seen = []
+
+    def cfg(self, **extra):
+        return server.Config({"DASHBOARD_TOKEN": TOKEN, "TAILSCALE_SOCKET": self.sock, **extra})
+
+    def test_summary_uses_magicdns_names(self):
+        summary = server.summarize_tailnet(server.tailscale_status(self.cfg()))
+        self.assertEqual(summary["self"]["name"], "n8npi")
+        self.assertEqual([p["name"] for p in summary["peers"]], ["dorkmini", "phone"])
+        self.assertIsNone(summary["peers"][0]["last_seen"], "zero time means online now")
+        self.assertEqual(FakeTailscaled.seen, [("/localapi/v0/status", "localapi")])
+
+    def test_checks_ok_when_mac_online(self):
+        ts, peer = server.check_tailnet(self.cfg())
+        self.assertEqual((ts["status"], peer["status"]), ("OK", "OK"))
+        self.assertIn("1/2 peers online", ts["detail"])
+        self.assertEqual(peer["device"], "dorkmini")
+
+    def test_mac_offline_is_fail(self):
+        FakeTailscaled.status["Peer"]["nodekey:a"]["Online"] = False
+        FakeTailscaled.status["Peer"]["nodekey:a"]["LastSeen"] = "2026-11-05T01:00:00Z"
+        _, peer = server.check_tailnet(self.cfg())
+        self.assertEqual(peer["status"], "FAIL")
+        self.assertIn("last seen", peer["detail"])
+
+    def test_renamed_mac_is_warn(self):
+        _, peer = server.check_tailnet(self.cfg(MAC_HOSTNAME="macmini"))
+        self.assertEqual(peer["status"], "WARN")
+
+    def test_logged_out_is_fail(self):
+        FakeTailscaled.status["BackendState"] = "NeedsLogin"
+        ts, _ = server.check_tailnet(self.cfg())
+        self.assertEqual(ts["status"], "FAIL")
+
+    def test_missing_socket_is_skip(self):
+        ts, peer = server.check_tailnet(self.cfg(TAILSCALE_SOCKET="/nonexistent/tailscaled.sock"))
+        self.assertEqual((ts["status"], peer["status"]), ("SKIP", "SKIP"))
+
+    def test_api_tailnet_endpoint(self):
+        app = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(self.cfg(DASHBOARD_ACCESS_LOG="0")))
+        url = start(app)
+        try:
+            req = urllib.request.Request(url + "/api/tailnet", headers={"Authorization": f"Bearer {TOKEN}"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                body = json.loads(r.read())
+            self.assertTrue(body["available"])
+            self.assertEqual(body["tailnet"], "example.github")
+        finally:
+            app.shutdown()
+            app.server_close()
 
 
 if __name__ == "__main__":

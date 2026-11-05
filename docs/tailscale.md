@@ -4,8 +4,9 @@
 
 - Short names (`n8npi`, `dorkmini`) work on devices with MagicDNS enabled. The FQDN
   is `<host>.<tailnet>.ts.net`; use it where search domains are not applied.
-- **Inside Docker containers** MagicDNS works only if the container inherits the
-  host resolver. If n8n/LiteLLM report `ENOTFOUND dorkmini`, see `runbook.md`.
+- **Inside Docker containers** the stack does not depend on MagicDNS: compose maps
+  `dorkmini`/`n8npi` to the IPs in `.env`. If a device's Tailscale IP ever changes
+  (re-registration), update `.env` and run `make up-pi`.
 - Keep hostnames stable: renaming a device in the admin console changes its
   MagicDNS name and breaks every URL in `.env` and the workflows.
 - Tailscale IPs (`tailscale ip -4`) are stable per device but are personal data:

@@ -148,6 +148,7 @@ td code { white-space: nowrap; }
 }
 .badge-loaded { background: var(--ok-bg); color: var(--ok); }
 .badge-required { background: var(--warn-bg); color: var(--warn); }
+.row-known td:first-child strong { color: var(--accent); }
 .badge-cloud { background: var(--skip-bg); color: var(--skip); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; align-items: center; }

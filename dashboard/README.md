@@ -2,9 +2,10 @@
 
 A small web UI for the homelab, served on **n8npi** next to n8n:
 
-- **Overview**: n8n, LiteLLM, OpenClaw and backups on n8npi, plus Ollama and the
-  required models on dorkmini. These are the same checks as `scripts/healthcheck.sh`,
-  refreshed every 30 s.
+- **Overview**: Tailscale, n8n, LiteLLM, OpenClaw and backups on n8npi; dorkmini's
+  tailnet presence, Ollama and the required models. These are the same checks as
+  `scripts/healthcheck.sh`, refreshed every 30 s. A **Tailnet** panel lists every
+  device with online/offline state, OS, IP and last-seen time.
 - **Models**: installed Ollama models (params, quantisation, size), which are loaded
   and which are required, plus the LiteLLM model groups.
 - **Playground**: chat through LiteLLM with streamed replies. Each reply shows which
@@ -22,9 +23,10 @@ A small web UI for the homelab, served on **n8npi** next to n8n:
 ```
 browser ──(Tailscale, Bearer DASHBOARD_TOKEN)──▶ dashboard :8080 on n8npi
                                                    ├─▶ n8n        http://n8n:5678 (compose network)
-                                                   ├─▶ LiteLLM    LITELLM_URL  (key stays server-side)
-                                                   ├─▶ Ollama     OLLAMA_URL
+                                                   ├─▶ LiteLLM    http://litellm:4000 (key stays server-side)
+                                                   ├─▶ Ollama     http://dorkmini:11434 (fixed host entry)
                                                    ├─▶ OpenClaw   OPENCLAW_URL (optional)
+                                                   ├─▶ tailscaled /var/run/tailscale (read-only status)
                                                    └─▶ status.json (read-only bind mount)
 ```
 
@@ -63,9 +65,11 @@ make dashboard-dev          # serves 127.0.0.1:8080 using .env
 | `DASHBOARD_PORT` | `8080` | Host port on the Pi's Tailscale IP |
 | `DASHBOARD_URL` | `http://n8npi:8080` | Used by `scripts/healthcheck.sh` |
 | `BACKUP_MAX_AGE_HOURS` | `36` | Backups older than this show WARN |
+| `MAC_HOSTNAME` / `PI_HOSTNAME` | `dorkmini` / `n8npi` | Tailnet names used for grouping and the presence check |
 | `N8N_URL`, `OLLAMA_URL`, `LITELLM_URL`, `OPENCLAW_URL`, `LITELLM_MASTER_KEY`, `HEALTHCHECK_REQUIRED_MODELS` | shared | Same values the scripts use |
 
-Advanced, set in compose if needed: `DASHBOARD_REFRESH_SECONDS` (30),
+Advanced, set in compose if needed: `TAILSCALE_SOCKET`
+(`/var/run/tailscale/tailscaled.sock`), `DASHBOARD_REFRESH_SECONDS` (30),
 `DASHBOARD_CHECK_TIMEOUT` (5 s), `DASHBOARD_CHAT_TIMEOUT` (180 s),
 `DASHBOARD_CACHE_SECONDS` (5), `DASHBOARD_ACCESS_LOG` (`0` to silence).
 
@@ -78,11 +82,19 @@ Advanced, set in compose if needed: `DASHBOARD_REFRESH_SECONDS` (30),
 | `GET /api/status` | yes | checks with `status` OK/WARN/FAIL/SKIP, `device`, `detail`, `latency_ms` |
 | `GET /api/models` | yes | Ollama installed/loaded/missing-required, LiteLLM groups |
 | `GET /api/backups` | yes | `status.json` plus `age_hours` and `stale` |
+| `GET /api/tailnet` | yes | this host + peers: name, online, OS, IPs, last seen |
 | `POST /api/chat` | yes | OpenAI-style body; SSE stream; `X-Model-Group` and `X-Attempted-Fallbacks` headers |
 
 ## Tests
 
-`make test` runs `tests/test_server.py`: 17 tests against stub upstreams, covering
-auth, status grouping, stale or failed backups, models, chat streaming, routing
-headers, input validation, security headers, path traversal and token validation.
-CI also builds the image.
+`make test` runs `tests/test_server.py`: 24 tests against stub upstreams and a fake
+tailscaled on a unix socket. They cover:
+- auth and token validation
+- status grouping and stale or failed backups
+- tailnet presence (online, offline, renamed, logged out, socket missing)
+- models
+- chat streaming, routing headers and input validation
+- security headers and path traversal
+
+CI also builds the image. The screenshots above come from the real compose stack
+(n8n, LiteLLM, this image) on a simulated tailnet.

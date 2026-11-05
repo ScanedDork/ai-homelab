@@ -11,6 +11,7 @@ API (all /api/* routes need `Authorization: Bearer $DASHBOARD_TOKEN`):
   GET  /api/status     service checks grouped by device (cached briefly)
   GET  /api/models     Ollama installed/loaded/required + LiteLLM model groups
   GET  /api/backups    BACKUP_DIR/status/status.json written by backup-n8n.sh
+  GET  /api/tailnet    devices on the tailnet (read-only tailscaled local API)
   POST /api/chat       chat via LiteLLM; streams Server-Sent Events
 
 Configuration comes from environment variables (see dashboard/README.md).
@@ -21,10 +22,12 @@ from __future__ import annotations
 
 import argparse
 import hmac
+import http.client
 import json
 import mimetypes
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -36,7 +39,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 MAX_BODY_BYTES = 256 * 1024
@@ -76,6 +79,7 @@ class Config:
         self.pi_name = get("PI_HOSTNAME", "n8npi")
         self.mac_name = get("MAC_HOSTNAME", "dorkmini")
         self.access_log = get("DASHBOARD_ACCESS_LOG", "1") != "0"
+        self.tailscale_socket = get("TAILSCALE_SOCKET", "/var/run/tailscale/tailscaled.sock")
 
     def validate(self) -> list[str]:
         problems = []
@@ -117,6 +121,74 @@ def get_json(url: str, *, timeout: float, headers: dict[str, str] | None = None)
         return json.loads(body)
     except ValueError as exc:
         raise UpstreamError("invalid JSON from upstream") from exc
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP over a unix socket (tailscaled's local API)."""
+
+    def __init__(self, path: str, timeout: float):
+        super().__init__("local-tailscaled.sock", timeout=timeout)
+        self._path = path
+
+    def connect(self):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self._path)
+        self.sock = sock
+
+
+def tailscale_status(cfg: Config) -> dict:
+    """GET /localapi/v0/status from tailscaled; raise UpstreamError on failure."""
+    path = cfg.tailscale_socket
+    if not path or not os.path.exists(path):
+        raise UpstreamError("tailscaled socket not mounted")
+    conn = _UnixHTTPConnection(path, cfg.timeout)
+    try:
+        conn.request("GET", "/localapi/v0/status",
+                     headers={"Host": "local-tailscaled.sock", "Sec-Tailscale": "localapi"})
+        resp = conn.getresponse()
+        body = resp.read()
+    except OSError as exc:
+        raise UpstreamError(f"tailscaled: {exc}") from exc
+    finally:
+        conn.close()
+    if resp.status != 200:
+        raise UpstreamError(f"tailscaled HTTP {resp.status}: {body[:120].decode('utf-8', 'replace')}")
+    try:
+        return json.loads(body)
+    except ValueError as exc:
+        raise UpstreamError("tailscaled returned invalid JSON") from exc
+
+
+def _short_name(node: dict) -> str:
+    dns = (node.get("DNSName") or "").rstrip(".")
+    return (dns.split(".", 1)[0] if dns else node.get("HostName") or "").lower()
+
+
+def summarize_tailnet(status: dict) -> dict:
+    def node(n: dict, online=None) -> dict:
+        last_seen = n.get("LastSeen")
+        if not last_seen or last_seen.startswith("0001-"):
+            last_seen = None
+        return {
+            "name": _short_name(n),
+            "hostname": n.get("HostName"),
+            "dns_name": (n.get("DNSName") or "").rstrip("."),
+            "os": n.get("OS"),
+            "online": bool(n.get("Online")) if online is None else online,
+            "ips": n.get("TailscaleIPs") or [],
+            "last_seen": last_seen,
+        }
+    me = node(status.get("Self") or {}, online=status.get("BackendState") == "Running")
+    peers = sorted((node(p) for p in (status.get("Peer") or {}).values()),
+                   key=lambda x: (not x["online"], x["name"]))
+    return {
+        "backend_state": status.get("BackendState"),
+        "tailnet": (status.get("CurrentTailnet") or {}).get("Name"),
+        "magicdns_suffix": status.get("MagicDNSSuffix"),
+        "self": me,
+        "peers": peers,
+    }
 
 
 def litellm_headers(cfg: Config) -> dict[str, str]:
@@ -200,6 +272,31 @@ def check_openclaw(cfg: Config):
                    "healthy" if status == 200 else f"HTTP {status}", t, cfg.openclaw_url)
 
 
+def check_tailnet(cfg: Config):
+    """Tailscale on this host + whether the Mac is online on the tailnet."""
+    t = time.monotonic()
+    try:
+        summary = summarize_tailnet(tailscale_status(cfg))
+    except UpstreamError as exc:
+        status = "SKIP" if "not mounted" in str(exc) else "FAIL"
+        return [_result("tailscale", cfg.pi_name, status, str(exc), t),
+                _result("tailnet-peer", cfg.mac_name, "SKIP", "tailnet status unavailable")]
+    state = summary["backend_state"]
+    online = sum(1 for p in summary["peers"] if p["online"])
+    first = _result("tailscale", cfg.pi_name, "OK" if state == "Running" else "FAIL",
+                    f"{state}, {online}/{len(summary['peers'])} peers online", t)
+    peer = next((p for p in summary["peers"] if p["name"] == cfg.mac_name.lower()), None)
+    if peer is None:
+        second = _result("tailnet-peer", cfg.mac_name, "WARN",
+                         f"no tailnet device named {cfg.mac_name!r} (renamed? set MAC_HOSTNAME)")
+    elif peer["online"]:
+        second = _result("tailnet-peer", cfg.mac_name, "OK", "online " + " ".join(peer["ips"][:1]))
+    else:
+        seen = f", last seen {peer['last_seen']}" if peer["last_seen"] else ""
+        second = _result("tailnet-peer", cfg.mac_name, "FAIL", f"offline{seen}")
+    return [first, second]
+
+
 def read_backup_status(cfg: Config) -> dict:
     """Return status.json plus derived fields; never raises."""
     path = cfg.backup_status_file
@@ -235,9 +332,10 @@ def check_backups(cfg: Config):
 
 
 def run_checks(cfg: Config) -> dict:
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    with ThreadPoolExecutor(max_workers=6) as pool:
         futures = [pool.submit(f, cfg) for f in
-                   (check_n8n, check_ollama, check_litellm, check_openclaw, check_backups)]
+                   (check_tailnet, check_n8n, check_ollama, check_litellm, check_openclaw,
+                    check_backups)]
         checks = []
         for fut in futures:
             res = fut.result()
@@ -406,6 +504,7 @@ def make_handler(cfg: Config):
                         cfg.cache_seconds, lambda: run_checks(cfg))),
                     "/api/models": lambda: self._json(200, collect_models(cfg)),
                     "/api/backups": lambda: self._json(200, read_backup_status(cfg)),
+                    "/api/tailnet": self._api_tailnet,
                 }
                 handler = routes.get(path)
                 return handler() if handler else self._error(404, "unknown endpoint")
@@ -428,6 +527,12 @@ def make_handler(cfg: Config):
                 "links": {"n8n": cfg.n8n_public_url, "openclaw": cfg.openclaw_url or None},
                 "chat_enabled": bool(cfg.litellm_url),
             })
+
+        def _api_tailnet(self):
+            try:
+                self._json(200, {"available": True, **summarize_tailnet(tailscale_status(cfg))})
+            except UpstreamError as exc:
+                self._json(200, {"available": False, "error": str(exc)})
 
         def _static(self, path: str):
             rel = "index.html" if path in ("", "/") else path.lstrip("/")

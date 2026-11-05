@@ -10,6 +10,7 @@ brew install ollama            # or install the app; the CLI is what launchd run
 ./mac/install-ollama-launchd.sh --dry-run   # inspect the rendered plist
 ./mac/install-ollama-launchd.sh             # install + load the LaunchAgent
 ./mac/pull-models.sh                        # pull the expected models
+./scripts/preflight.sh                      # verify: binding, LaunchAgent, sleep, models
 ```
 
 `install-ollama-launchd.sh` takes the bind IP from `--ip`, else `MAC_TAILSCALE_IP`

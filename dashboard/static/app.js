@@ -111,6 +111,8 @@ function showTab(name) {
 
 // ---------------------------------------------------------------- overview
 const SERVICE_LABELS = {
+  tailscale: "Tailscale",
+  "tailnet-peer": "On the tailnet",
   n8n: "n8n",
   litellm: "LiteLLM proxy",
   openclaw: "OpenClaw gateway",
@@ -165,13 +167,37 @@ function renderBackups(b) {
   dl.replaceChildren(...rows.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", {}, v)]));
 }
 
+function renderTailnet(t) {
+  const box = $("#tailnet");
+  const meta = $("#tailnet-meta");
+  if (!t.available) {
+    meta.textContent = "";
+    box.replaceChildren(el("p", { class: "muted small" }, `Tailnet status unavailable: ${t.error}. `,
+      "Mount /var/run/tailscale into the dashboard container (pi/docker-compose.yml does this)."));
+    return;
+  }
+  meta.textContent = [t.tailnet, t.magicdns_suffix].filter(Boolean).join(" · ");
+  const known = new Set(Object.values(state.config?.devices || {}).map((d) => d.toLowerCase()));
+  const rows = [{ ...t.self, self: true }, ...t.peers].map((n) => el("tr", { class: known.has(n.name) ? "row-known" : null },
+    el("td", {}, el("strong", { text: n.name || n.hostname || "?" }), n.self ? el("span", { class: "badge", text: "this host" }) : null),
+    el("td", {}, el("span", { class: `pill pill-${n.online ? "OK" : "FAIL"}`, text: n.online ? "online" : "offline" })),
+    el("td", { text: n.os || "–" }),
+    el("td", {}, el("code", { text: (n.ips || [])[0] || "–" })),
+    el("td", { class: "muted small", text: n.online ? "now" : n.last_seen ? timeAgo(new Date(n.last_seen)) : "–" })));
+  box.replaceChildren(el("div", { class: "table-wrap" }, el("table", {},
+    el("thead", {}, el("tr", {}, ["Device", "State", "OS", "Tailscale IP", "Last seen"].map((h) => el("th", { text: h })))),
+    el("tbody", {}, rows))));
+}
+
 async function refresh() {
   const btn = $("#refresh");
   btn.disabled = true;
   try {
-    const [status, backups] = await Promise.all([apiJson("/api/status"), apiJson("/api/backups")]);
+    const [status, backups, tailnet] = await Promise.all(
+      [apiJson("/api/status"), apiJson("/api/backups"), apiJson("/api/tailnet")]);
     renderStatus(status);
     renderBackups(backups);
+    renderTailnet(tailnet);
     state.lastUpdated = new Date();
     if (!$("#view-models").hidden) loadModels();
   } catch (e) {
@@ -238,7 +264,8 @@ async function loadGroups() {
   if (select.options.length) return;
   try {
     const data = await apiJson("/api/models");
-    const groups = (data.litellm && data.litellm.groups) || [];
+    // Embedding groups cannot chat; keep them out of the picker.
+    const groups = ((data.litellm && data.litellm.groups) || []).filter((g) => !/embed/i.test(g.id));
     select.replaceChildren(...groups.map((g) => el("option", { value: g.id, text: g.local ? `${g.id} (local first)` : g.id })));
     const preferred = groups.find((g) => g.id === "local-chat");
     if (preferred) select.value = preferred.id;
